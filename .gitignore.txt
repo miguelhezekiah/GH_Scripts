@@ -1,0 +1,10 @@
+.vs/
+obj/
+bin/
+*.sln
+*.csproj
+*.csproj.user
+.editorconfig
+*.3dm.rhl
+*.3dmbak
+*.rhproj
