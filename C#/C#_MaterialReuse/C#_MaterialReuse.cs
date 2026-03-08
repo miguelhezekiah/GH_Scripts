@@ -48,12 +48,7 @@ public class Script_Instance : GH_ScriptInstance
     if (Reset)
     {
     // Wipe the memory clean
-    used.Clear();
-    unused.Clear();
-    tags.Clear();
-    if (hitboxes != null) hitboxes.Clear();
-    
-    active_target = -1;
+    assign.Clear();
     show_ui = false;
     
     // Shut down the sensor
@@ -70,62 +65,64 @@ public class Script_Instance : GH_ScriptInstance
 
     if (Run)
     {
-        used.Clear();
-        unused.Clear();
-        tags.Clear();
-        hitboxes = new List<Box>();
+        assign.Clear();
 
-        List<bool> available = Enumerable.Repeat(true, ElementLength.Count).ToList();
         ElementLength.Sort();
+        List<bool> available = Enumerable.Repeat(true, ElementLength.Count).ToList();
+        List<Line> elements_sorted = Element.OrderByDescending(m => m.Length).ToList();
 
-        foreach (Line m in Element)
+        double total_part_length = 0;
+        double total_stock_used = 0;
+
+        foreach (Line m in elements_sorted)
         {
-            bool found = false;
+            int best_option = -1;
+            double min_cut = double.MaxValue;
 
             for(int i = 0; i < ElementLength.Count; i++)
             {
                 // Assign Elements
                 if (available[i] && ElementLength[i] >= m.Length) 
                 {
-                    available[i] = false;
-                    used.Add(m);
-                    Point3d start_point = m.PointAt(0);
-                    Point3d end_point = m.PointAt(1);
-
-                    double cut = ElementLength[i] - m.Length;
-                    tags.Add($"From Database Number: {i}\nLength of Member in Structure: {m.Length:F2} m\nCut: {cut:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}");
-
-                    // Construct Bounding Box
-                    Plane beam_plane = new Plane(m.PointAt(0.5), m.Direction);
-
-                    double t = 0.5; 
-                    double half_L = m.Length / 2.0;
-
-                    // Construct the mathematical Oriented Box
-                    Rhino.Geometry.Box bbox = new Rhino.Geometry.Box
-                    (
-                        beam_plane, 
-                        new Interval(-t, t),    // X thickness
-                        new Interval(-t, t),    // Y thickness
-                        new Interval(-half_L, half_L) // Z length
-                    );
-
-                    hitboxes.Add(bbox);
-
-                    found = true;
-                    break;
+                    double current_cut = ElementLength[i] - m.Length;
+                    if (current_cut < min_cut)
+                    {
+                        min_cut = current_cut;
+                        best_option = i;
+                    }
+                    tags.Add($"ID: {i} | Length: {ElementLength[i]} m");
                 }
             }
 
-        }
-   
-        for (int i = 0; i < ElementLength.Count; i++)
-        {
-            if (available[i] == true)
+            if (best_option != -1)
             {
-                unused.Add($"ID: {i} | Length: {ElementLength[i]} m");
+                available[best_option] = false;
+                total_part_length += m.Length;
+                total_stock_used += ElementLength[best_option];
+
+                // Generate Properties
+                Point3d start_point = m.PointAt(0);
+                Point3d end_point = m.PointAt(1);
+                double member_yield = (m.Length / ElementLength[best_option]) * 100;
+                string tag = $"From Database Number: {best_option}\nLength of Member in Structure: {m.Length:F2} m\nCut: {member_yield:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}";
+
+                // Construct Bounding Box
+                Plane bbox_plane = new Plane(m.PointAt(0.5), m.Direction);
+                Interval thickness = new Interval(-0.05, 0.05);
+                Interval length = new Interval(-m.Length/2.0, m.Length/2.0);
+                Box bbox = new Box(bbox_plane, thickness, thickness, length);
+
+                // Construct Object
+                Material assigned_material = new Material(m, bbox, tag);
+                assign.Add(assigned_material);
+                used.Add(assigned_material.Member);
+                
             }
 
+            if (available[best_option] == true || best_option == -1)
+            {
+                unused.Add(m);
+            }
         }
 
         // Turning on the sensor
@@ -140,8 +137,6 @@ public class Script_Instance : GH_ScriptInstance
         mouse_sensor.Enabled = true;
 
         GrasshopperDocument.ObjectsDeleted += KillSwitchEvent;
-
-        
     }
         // Output
         UsedMembers = used;
@@ -155,16 +150,25 @@ public class Script_Instance : GH_ScriptInstance
 
     #region Additional
     // <Custom additional code> 
-
-    // Initialize
     List<Line> used = new List<Line>();
-    List<string> unused = new List<string>();
+    List<Line> unused = new List<Line>();
     List<string> tags = new List<string>();
 
-    List<Mesh> diagrams = new List<Mesh>();
-    List<Line> edges = new List<Line>();
-    List<Box> hitboxes;
-    int active_target = 0;
+    public class Material
+    {
+        public Line Member;
+        public Box Hitbox;
+        public string Properties;
+
+        public Material(Line line, Box box, string property)
+        {
+            Member = line;
+            Hitbox = box;
+            Properties = property;
+        }
+    }
+
+    public List<Material> assign = new List<Material>();
 
     static Sensor mouse_sensor;
 
@@ -176,10 +180,11 @@ public class Script_Instance : GH_ScriptInstance
     int drag_offset_x = 0;
     int drag_offset_y = 0;
 
-    int ui_width = 220; // Made slightly wider to fit the new coordinate text
+    int ui_width = 220; 
     int ui_height = 130;
+    int active_target = 0;
 
-    // Classes
+    // Onclick Event
     void KillSwitchEvent(object sender, GH_DocObjectEventArgs e)
     {
         if(e.Objects.Contains(Component))
@@ -224,11 +229,11 @@ public class Script_Instance : GH_ScriptInstance
             int new_target = -1;
             double closest_distance = double.MaxValue;
 
-            for (int i = 0; i < Owner.hitboxes.Count; i++)
+            for (int i = 0; i < Owner.assign.Count; i++)
             {
-                Rhino.Geometry.Interval hit;
-
-                if (Rhino.Geometry.Intersect.Intersection.LineBox(laser, Owner.hitboxes[i], 0.01, out hit))
+                Interval hit;
+                
+                if (Rhino.Geometry.Intersect.Intersection.LineBox(laser, Owner.assign[i].Hitbox, 0.01, out hit))
                 {
                     if (hit.T0 < closest_distance)
                     {
@@ -279,17 +284,14 @@ public class Script_Instance : GH_ScriptInstance
     {
         try
         {
-            if (used == null) return;
+            if (assign == null) return;
 
-            if (active_target >= 0 && active_target < used.Count && active_target < tags.Count)
+            if (show_ui && active_target >= 0 && active_target < assign.Count)
             {
                 // Highlight Selected Element
-                Line selected_element = used[active_target];
+                Line selected_element = assign[active_target].Member;
                 args.Display.DrawLine(selected_element, Color.FromArgb(255, 200, 0), 4);
-            }
-
-            if (show_ui && active_target >= 0 && active_target < tags.Count)
-            {
+            
                 int x = ui_x;
                 int y = ui_y;
                 int header_h = 25;
@@ -314,9 +316,10 @@ public class Script_Instance : GH_ScriptInstance
                 // Draw Body Text
                 Point2d body_pos = new Point2d(x + 10, y + header_h + 10);
                 string body_text = "";
+
                 if (tags != null && active_target < tags.Count)
                 {
-                    body_text = tags[active_target];
+                    body_text = assign[active_target].Properties;
                 }
 
                 args.Display.Draw2dText(body_text, Color.FromArgb(175, 175, 175), body_pos, false, 12);
