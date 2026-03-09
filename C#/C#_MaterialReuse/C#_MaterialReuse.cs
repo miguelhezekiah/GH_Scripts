@@ -44,103 +44,101 @@ public class Script_Instance : GH_ScriptInstance
 		ref object UnusedMembers,
 		ref object Tags)
     {
-        
-    if (Reset)
-    {
-    // Wipe the memory clean
-    assign.Clear();
-    show_ui = false;
-    
-    // Shut down the sensor
-    if (mouse_sensor != null)
-    {
-        mouse_sensor.Enabled = false;
-        mouse_sensor = null;
-    }
-    
-    // Exit the script immediately after resetting
-    return; 
-    }    
-
-
-    if (Run)
-    {
-        assign.Clear();
-
-        ElementLength.Sort();
-        List<bool> available = Enumerable.Repeat(true, ElementLength.Count).ToList();
-        List<Line> elements_sorted = Element.OrderByDescending(m => m.Length).ToList();
-
-        double total_part_length = 0;
-        double total_stock_used = 0;
-
-        foreach (Line m in elements_sorted)
+        if (Reset)
         {
-            int best_option = -1;
-            double min_cut = double.MaxValue;
+            assign.Clear();
+            unused.Clear();
+            show_ui = false;
+            active_target = -1;
 
-            for(int i = 0; i < ElementLength.Count; i++)
+            if (mouse_sensor != null)
             {
-                // Assign Elements
-                if (available[i] && ElementLength[i] >= m.Length) 
+                mouse_sensor.Enabled = false;
+                mouse_sensor = null;
+            }
+
+            return; 
+        }    
+
+        if (Run)
+        {
+            assign.Clear();
+            unused.Clear();
+
+            ElementLength.Sort();
+            List<bool> available = Enumerable.Repeat(true, ElementLength.Count).ToList();
+            List<Line> elements_sorted = Element.OrderByDescending(m => m.Length).ToList();
+
+            foreach (Line m in elements_sorted)
+            {
+                int best_option = -1;
+                double min_cut = double.MaxValue;
+
+                for(int i = 0; i < ElementLength.Count; i++)
                 {
-                    double current_cut = ElementLength[i] - m.Length;
-                    if (current_cut < min_cut)
+                    // Assign Elements
+                    if (available[i] && ElementLength[i] >= m.Length) 
                     {
-                        min_cut = current_cut;
-                        best_option = i;
+                        double current_cut = ElementLength[i] - m.Length;
+                        if (current_cut < min_cut)
+                        {
+                            min_cut = current_cut;
+                            best_option = i;
+                        }
                     }
-                    tags.Add($"ID: {i} | Length: {ElementLength[i]} m");
+                }
+
+                if (best_option != -1)
+                {
+                    available[best_option] = false;
+
+                    // Generate Properties
+                    Point3d start_point = m.PointAt(0);
+                    Point3d end_point = m.PointAt(1);
+                    double member_yield = (m.Length / ElementLength[best_option]) * 100;
+                    string tag = $"From Database Number: {best_option}\nLength of Member in Structure: {m.Length:F2} m\nCut: {min_cut:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}";
+
+                    // Construct Bounding Box
+                    Plane bbox_plane = new Plane(m.PointAt(0.5), m.Direction);
+                    Interval thickness = new Interval(-0.25, 0.25);
+                    Interval length = new Interval(-m.Length/2.0, m.Length/2.0);
+                    Box bbox = new Box(bbox_plane, thickness, thickness, length);
+
+                    // Construct Object
+                    Material assigned_material = new Material(m, bbox, tag);
+                    assign.Add(assigned_material);
+                }
+                for (int i = 0; i < ElementLength.Count; i++)
+                {
+                    if (available[i] = true)
+                    {
+                        //unused.Add(ElementLength[i]);
+                    }
                 }
             }
 
-            if (best_option != -1)
+            // Turn on the sensor
+            if (mouse_sensor != null)
             {
-                available[best_option] = false;
-                total_part_length += m.Length;
-                total_stock_used += ElementLength[best_option];
-
-                // Generate Properties
-                Point3d start_point = m.PointAt(0);
-                Point3d end_point = m.PointAt(1);
-                double member_yield = (m.Length / ElementLength[best_option]) * 100;
-                string tag = $"From Database Number: {best_option}\nLength of Member in Structure: {m.Length:F2} m\nCut: {member_yield:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}";
-
-                // Construct Bounding Box
-                Plane bbox_plane = new Plane(m.PointAt(0.5), m.Direction);
-                Interval thickness = new Interval(-0.05, 0.05);
-                Interval length = new Interval(-m.Length/2.0, m.Length/2.0);
-                Box bbox = new Box(bbox_plane, thickness, thickness, length);
-
-                // Construct Object
-                Material assigned_material = new Material(m, bbox, tag);
-                assign.Add(assigned_material);
-                used.Add(assigned_material.Member);
-                
+                mouse_sensor.Enabled = false;
+                mouse_sensor = null; 
             }
 
-            if (available[best_option] == true || best_option == -1)
-            {
-                unused.Add(m);
-            }
+            mouse_sensor = new Sensor();
+            mouse_sensor.Owner = this;
+            mouse_sensor.Enabled = true;
+
+            GrasshopperDocument.ObjectsDeleted += KillSwitchEvent;
         }
-
-        // Turning on the sensor
-        if (mouse_sensor != null)
-        {
-            mouse_sensor.Enabled = false;
-            mouse_sensor = null; 
-        }
-
-        mouse_sensor = new Sensor();
-        mouse_sensor.Owner = this;
-        mouse_sensor.Enabled = true;
-
-        GrasshopperDocument.ObjectsDeleted += KillSwitchEvent;
-    }
+        
         // Output
+        foreach (Material material in assign)
+        {
+            used.Add(material.Member);
+            tags.Add(material.Properties);
+        }
         UsedMembers = used;
-        UnusedMembers = unused;
+        //UnusedMembers = unused;
         Tags = tags;
 
         // Redraw
@@ -150,10 +148,6 @@ public class Script_Instance : GH_ScriptInstance
 
     #region Additional
     // <Custom additional code> 
-    List<Line> used = new List<Line>();
-    List<Line> unused = new List<Line>();
-    List<string> tags = new List<string>();
-
     public class Material
     {
         public Line Member;
@@ -169,7 +163,9 @@ public class Script_Instance : GH_ScriptInstance
     }
 
     public List<Material> assign = new List<Material>();
-
+    List<Line> used = new List<Line>();
+    List<double> unused = new List<double>();
+    List<string> tags = new List<string>();
     static Sensor mouse_sensor;
 
     // UI State
@@ -232,7 +228,6 @@ public class Script_Instance : GH_ScriptInstance
             for (int i = 0; i < Owner.assign.Count; i++)
             {
                 Interval hit;
-                
                 if (Rhino.Geometry.Intersect.Intersection.LineBox(laser, Owner.assign[i].Hitbox, 0.01, out hit))
                 {
                     if (hit.T0 < closest_distance)
@@ -291,11 +286,11 @@ public class Script_Instance : GH_ScriptInstance
                 // Highlight Selected Element
                 Line selected_element = assign[active_target].Member;
                 args.Display.DrawLine(selected_element, Color.FromArgb(255, 200, 0), 4);
-            
+                
                 int x = ui_x;
                 int y = ui_y;
                 int header_h = 25;
-                                            
+                
                 // Draw Main Background (White Body)
                 System.Drawing.Rectangle body = new System.Drawing.Rectangle(x, y + header_h, ui_width, ui_height - header_h);
                 args.Display.Draw2dRectangle(body, Color.Empty, 0, Color.FromArgb(30, 30, 30));
