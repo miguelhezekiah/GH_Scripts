@@ -65,38 +65,38 @@ public class Script_Instance : GH_ScriptInstance
             assign.Clear();
             unused.Clear();
 
-            ElementLength.Sort();
-            List<bool> available = Enumerable.Repeat(true, ElementLength.Count).ToList();
-            List<Line> elements_sorted = Element.OrderByDescending(m => m.Length).ToList();
+            List<Stock> stock = new List<Stock>();
 
-            foreach (Line m in elements_sorted)
+            for(int i = 0; i < ElementLength.Count; i++)
             {
-                int best_option = -1;
-                double min_cut = double.MaxValue;
+                stock.Add(new Stock(i, ElementLength[i]));
+            }
 
-                for(int i = 0; i < ElementLength.Count; i++)
+            stock = stock.OrderBy(w => w.Length).ToList();
+
+            foreach (Line m in Element)
+            {
+                Stock best_option = null;
+
+                foreach (Stock item in stock)
                 {
                     // Assign Elements
-                    if (available[i] && ElementLength[i] >= m.Length) 
+                    if (item.IsAvailable && item.Length >= m.Length) 
                     {
-                        double current_cut = ElementLength[i] - m.Length;
-                        if (current_cut < min_cut)
-                        {
-                            min_cut = current_cut;
-                            best_option = i;
-                        }
+                        best_option = item;
+                        break;
                     }
                 }
 
-                if (best_option != -1)
+                if (best_option != null)
                 {
-                    available[best_option] = false;
+                    best_option.IsAvailable = false;
 
                     // Generate Properties
+                    double cut = best_option.Length - m.Length;
                     Point3d start_point = m.PointAt(0);
                     Point3d end_point = m.PointAt(1);
-                    double member_yield = (m.Length / ElementLength[best_option]) * 100;
-                    string tag = $"From Database Number: {best_option}\nLength of Member in Structure: {m.Length:F2} m\nCut: {min_cut:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}";
+                    string tag = $"Using database #{best_option.ID}\nLength in model: {m.Length:F2} m\nCut: {cut:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}";
 
                     // Construct Bounding Box
                     Plane bbox_plane = new Plane(m.PointAt(0.5), m.Direction);
@@ -108,12 +108,14 @@ public class Script_Instance : GH_ScriptInstance
                     Material assigned_material = new Material(m, bbox, tag);
                     assign.Add(assigned_material);
                 }
-                for (int i = 0; i < ElementLength.Count; i++)
+                
+            }
+            
+            foreach (Stock item in stock)
+            {
+                if (item.IsAvailable == true)
                 {
-                    if (available[i] = true)
-                    {
-                        //unused.Add(ElementLength[i]);
-                    }
+                    unused.Add(item.Length);
                 }
             }
 
@@ -138,7 +140,7 @@ public class Script_Instance : GH_ScriptInstance
             tags.Add(material.Properties);
         }
         UsedMembers = used;
-        //UnusedMembers = unused;
+        UnusedMembers = unused;
         Tags = tags;
 
         // Redraw
@@ -162,6 +164,20 @@ public class Script_Instance : GH_ScriptInstance
         }
     }
 
+    public class Stock
+    {
+        public int ID;
+        public double Length;
+        public bool IsAvailable;
+
+        public Stock(int id, double length)
+        {
+            ID = id;
+            Length = length;
+            IsAvailable = true;
+        }
+    }
+
     public List<Material> assign = new List<Material>();
     List<Line> used = new List<Line>();
     List<double> unused = new List<double>();
@@ -176,8 +192,8 @@ public class Script_Instance : GH_ScriptInstance
     int drag_offset_x = 0;
     int drag_offset_y = 0;
 
-    int ui_width = 220; 
-    int ui_height = 130;
+    int ui_width = 280; 
+    int ui_height = 140;
     int active_target = 0;
 
     // Onclick Event
@@ -289,7 +305,7 @@ public class Script_Instance : GH_ScriptInstance
                 
                 int x = ui_x;
                 int y = ui_y;
-                int header_h = 25;
+                int header_h = 30;
                 
                 // Draw Main Background (White Body)
                 System.Drawing.Rectangle body = new System.Drawing.Rectangle(x, y + header_h, ui_width, ui_height - header_h);
@@ -304,9 +320,9 @@ public class Script_Instance : GH_ScriptInstance
                 args.Display.Draw2dRectangle(border, Color.FromArgb(30, 30, 30), 2, Color.Empty);
                 
                 // Draw Header Text (White, Bold-ish)
-                string header_text = $"BEAM NUMBER : {active_target}";
+                string header_text = $"ITEM #{active_target + 1}";
                 Point2d header_pos = new Point2d(x + 10, y + 5);
-                args.Display.Draw2dText(header_text, Color.FromArgb(175, 175, 175), header_pos, false, 12);
+                args.Display.Draw2dText(header_text, Color.FromArgb(175, 175, 175), header_pos, false, 16);
                 
                 // Draw Body Text
                 Point2d body_pos = new Point2d(x + 10, y + header_h + 10);
@@ -317,7 +333,7 @@ public class Script_Instance : GH_ScriptInstance
                     body_text = assign[active_target].Properties;
                 }
 
-                args.Display.Draw2dText(body_text, Color.FromArgb(175, 175, 175), body_pos, false, 12);
+                args.Display.Draw2dText(body_text, Color.FromArgb(175, 175, 175), body_pos, false, 14);
             }
         }
         catch (Exception ex)
