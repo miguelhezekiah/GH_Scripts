@@ -66,15 +66,21 @@ public class Script_Instance : GH_ScriptInstance
             unused.Clear();
 
             List<Stock> stock = new List<Stock>();
-
             for(int i = 0; i < ElementLength.Count; i++)
             {
                 stock.Add(new Stock(i, ElementLength[i]));
             }
 
-            stock = stock.OrderBy(w => w.Length).ToList();
+            List<Model> model_element = new List<Model>();
+            for(int i = 0; i < Element.Count; i++)
+            {
+                model_element.Add(new Model(i, Element[i], Element[i].Length));
+            }
 
-            foreach (Line m in Element)
+            stock = stock.OrderBy(w => w.Length).ToList();
+            model_element = model_element.OrderByDescending(n => n.Length).ToList();
+
+            foreach (Model m in model_element)
             {
                 Stock best_option = null;
 
@@ -94,18 +100,18 @@ public class Script_Instance : GH_ScriptInstance
 
                     // Generate Properties
                     double cut = best_option.Length - m.Length;
-                    Point3d start_point = m.PointAt(0);
-                    Point3d end_point = m.PointAt(1);
+                    Point3d start_point = m.Line.PointAt(0);
+                    Point3d end_point = m.Line.PointAt(1);
                     string tag = $"Using database #{best_option.ID}\nLength in model: {m.Length:F2} m\nCut: {cut:F2} m\nStart Point: {start_point:F2}\nEnd Point: {end_point:F2}";
 
                     // Construct Bounding Box
-                    Plane bbox_plane = new Plane(m.PointAt(0.5), m.Direction);
+                    Plane bbox_plane = new Plane(m.Line.PointAt(0.5), m.Line.Direction);
                     Interval thickness = new Interval(-0.25, 0.25);
                     Interval length = new Interval(-m.Length/2.0, m.Length/2.0);
                     Box bbox = new Box(bbox_plane, thickness, thickness, length);
 
                     // Construct Object
-                    Material assigned_material = new Material(m, bbox, tag);
+                    Material assigned_material = new Material(m.ID, m.Line, bbox, tag);
                     assign.Add(assigned_material);
                 }
                 
@@ -152,12 +158,14 @@ public class Script_Instance : GH_ScriptInstance
     // <Custom additional code> 
     public class Material
     {
+        public int ID;
         public Line Member;
         public Box Hitbox;
         public string Properties;
 
-        public Material(Line line, Box box, string property)
+        public Material(int id, Line line, Box box, string property)
         {
+            ID = id;
             Member = line;
             Hitbox = box;
             Properties = property;
@@ -175,6 +183,20 @@ public class Script_Instance : GH_ScriptInstance
             ID = id;
             Length = length;
             IsAvailable = true;
+        }
+    }
+
+    public class Model
+    {
+        public int ID;
+        public Line Line;
+        public double Length;
+
+        public Model(int id, Line line, double length)
+        {
+            ID = id;
+            Line = line;
+            Length = length;
         }
     }
 
@@ -320,7 +342,7 @@ public class Script_Instance : GH_ScriptInstance
                 args.Display.Draw2dRectangle(border, Color.FromArgb(30, 30, 30), 2, Color.Empty);
                 
                 // Draw Header Text (White, Bold-ish)
-                string header_text = $"ITEM #{active_target + 1}";
+                string header_text = $"ITEM #{assign[active_target].ID + 1}";
                 Point2d header_pos = new Point2d(x + 10, y + 5);
                 args.Display.Draw2dText(header_text, Color.FromArgb(175, 175, 175), header_pos, false, 16);
                 
